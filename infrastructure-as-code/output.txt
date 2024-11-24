@@ -1,0 +1,4 @@
+ec2_ariane_private_ip = "10.0.1.4"
+ec2_falcon_private_ip = "10.0.2.4"
+ec2_redis_private_ip = "10.0.2.5"
+eip_ariane_public_ip = "127.196.130.63"

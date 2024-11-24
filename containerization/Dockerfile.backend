@@ -1,0 +1,42 @@
+# Stage 1: Clone the repository and Build the Go binary
+FROM golang:1.20-alpine as builder
+
+## Install git and any necessary tools
+RUN apk add --no-cache git
+
+# Set the Current Working Directory inside the container
+WORKDIR /app
+
+## Clone the repository
+ARG REPO_URL="https://github.com/Yiadh/example-falcon.git"
+#ARG REPO_URL="https://github.com/slgevens/example-falcon.git"
+RUN git clone ${REPO_URL} .
+
+# Download all dependencies. Dependencies will be cached if the go.mod and go.sum files are not changed
+RUN go mod download
+
+RUN cat main.go
+# Copy the source code into the container
+#COPY . .
+
+# Build the Go app
+RUN go build -o falcon .
+
+
+# Stage 2: Create a smaller image for runtime
+FROM alpine:latest
+
+# Install necessary dependencies for running Go app (e.g., libc)
+RUN apk --no-cache add ca-certificates
+
+# Set the Current Working Directory inside the container
+WORKDIR /root/
+
+# Copy the pre-built binary from the builder stage
+COPY --from=builder /app/falcon .
+
+# Expose the port the app runs on
+EXPOSE 4000
+
+# Command to run the executable
+CMD ["./falcon"]
