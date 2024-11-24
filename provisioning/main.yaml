@@ -1,0 +1,115 @@
+---
+# IMPORTANT NOTE:
+# - Install the nginxinc.nginx role with the command `ansible-galaxy install nginxinc.nginx` before running run playbook
+# - Run the playbook as follow: ansible-playbook main.yaml -i inventory --vault-password-file encryption_key
+- name: Manage user accounts, system settings, and services
+  hosts: all
+  become: true
+  vars:
+    # The value of the encryption key has to be passed to the ansible-pplaybook command as vault-password
+    encryption_key: "hmbUga|U-Pa&1C0*"
+    # The nginx_vhosts variable will be used by the role nginxinc.nginx
+    nginx_vhosts:
+      - listen: "80"
+        server_name: "_"
+        location:
+          - url: "/"
+            proxy_pass: "http://localhost:55000"  # Forward requests to the Docker container
+  vars_files:
+    - users.yaml
+  roles:
+    - nginxinc.nginx
+    - geerlingguy.docker
+
+  tasks:
+    # 1. Set the open file limit for the root user
+    - name: Change the system open file limit to 65536 for the root user
+      pam_limits:
+        domain: root
+        limit_type: "-"
+        limit_item: nofile
+        value: 65536
+
+    # 2. Make sure that all user groups mentionned in YAML data structure are present
+    - name: Create user groups
+      group:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ user_accounts | dict2items | map(attribute='value.groups') | flatten | unique }}"
+
+    # 3. Create user accounts based on YAML data structure
+    - name: Create all users accounts contained in the yaml data structure
+      user:
+        name: "{{ item.login }}"
+        comment: "{{ item.name }} ({{ item.mail }})"
+        password: "{{ item.passwd | password_hash('sha512') }}"
+        groups: "{{ item.groups | join(',') }}"
+        shell: /bin/bash
+        create_home: true
+        state: present
+      loop: "{{ user_accounts.values() }}"
+
+    # 4. Add ssh keys for user accounts
+    - name: Add SSH keys
+      authorized_key:
+        user: "{{ item.login }}"
+        key: "{{ item.ssh_keys[0] }}"
+      loop: "{{ user_accounts.values() }}"
+
+    # 5. Add 'info' file in each user's home directory
+    - name: Create info files
+      copy:
+        content: |
+          Name: {{ item.name }}
+          Position: {{ item.position }}
+          Office: {{ item.office }}
+        dest: "/home/{{ item.login }}/info"
+        owner: "{{ item.login }}"
+        mode: 0644
+      loop: "{{ user_accounts.values() }}"
+
+    # 6. Install Docker
+    #- name: Install the docker package
+    #  package:
+    #    name: docker
+    #    state: present
+
+     7. Start Docker
+    - name: Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: true
+
+    # 8. Run the nginx-demo container
+    - name: Run the nginx-demo container
+      docker_container:
+        name: happy_roentgen
+        image: public.ecr.aws/q0x2y8f9/nginx-demo
+        state: started
+        published_ports:
+        - "80:55000"
+
+    # 9. Make sure that $CURRENT_DIR/files directory exists
+    - name: Create 'files' directory in the current working directory
+      file:
+        path: "{{ playbook_dir }}/files"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+
+    # 10. Download file prrtprrt.txt in localhost
+    - name: Download the prrtprrt.txt to localhost
+      get_url:
+        url: https://gist.githubusercontent.com/slgevens/aa9a2fc52cb5fef8b41c1b11a8b7d3e3/raw/dc1e3e288967bd4818277e4688d1daf615225337/prrtprrt.txt
+        dest: "{{ playbook_dir }}/files/prrtprrt.txt"
+      delegate_to: localhost
+
+    # 11. Copy the prrtprrt.txt to remote servers in each users `home/USER/prrtprrt.txt`
+    - name: Copy the prrtprrt.txt to remote servers
+      copy:
+        src: "{{ playbook_dir }}/files/prrtprrt.txt"
+        dest: "/home/{{ item.login }}/prrtprrt.txt"
+        owner: "{{ item.login }}"
+        mode: 0644
+      loop: "{{ user_accounts.values() }}"
